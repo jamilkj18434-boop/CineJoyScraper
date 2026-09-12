@@ -1,0 +1,34 @@
+name: Daily CineJoy Updater
+
+on:
+  schedule:
+    # Runs automatically every day at 8:00 AM UTC
+    - cron: '0 8 * * *'
+  # Allows you to trigger it manually anytime from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run Scraper
+        run: python update_cinejoy.py
+
+      - name: Commit updated M3U file back to repo
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add my_cinema.m3u
+          git diff-index --quiet HEAD || git commit -m "Auto-update playlist"
+          git push
