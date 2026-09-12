@@ -2,9 +2,7 @@ name: Daily CineJoy Updater
 
 on:
   schedule:
-    # Runs automatically every day at 8:00 AM UTC
     - cron: '0 8 * * *'
-  # Allows you to trigger it manually anytime from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -19,13 +17,15 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 cloudscraper
+      - name: Install Dependencies & Headless Browser
+        run: |
+          pip install beautifulsoup4 playwright
+          playwright install chromium --with-deps
 
       - name: Run Scraper
         run: python update_cinejoy.py
 
-      - name: Commit updated M3U file back to repo
+      - name: Commit updated M3U file
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
