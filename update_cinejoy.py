@@ -1,70 +1,63 @@
-import cloudscraper
+import asyncio
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from datetime import datetime
-import re
 
-# Set up cloudscraper with full browser headers
-scraper = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'desktop': True
-    }
-)
-
-base_url = "https://cinejoy.to"
-
-# Try multiple listing paths to ensure content is found
-target_urls = [
-    f"{base_url}/",
-    f"{base_url}/movies",
-    f"{base_url}/tv-shows",
-    f"{base_url}/trending"
-]
-
-scraped_items = {}
-now = datetime.now().strftime("%Y-%m-%d")
-
-for url in target_urls:
-    try:
-        print(f"Scraping {url}...")
-        response = scraper.get(url, timeout=15)
+async def main():
+    url = "https://cinejoy.to/"
+    
+    async with async_playwright() as p:
+        # Launch headless browser with anti-bot evasion settings
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720}
+        )
+        page = await context.new_page()
         
-        if response.status_code != 200:
-            print(f"Skipping {url} (HTTP Status {response.status_code})")
-            continue
+        print(f"Loading {url} via Headless Browser...")
+        try:
+            # Navigate and wait for JavaScript content to fully render
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.wait_for_timeout(3000)  # Wait 3s for hydration
+            
+            html_content = await page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            playlist_lines = ["#EXTM3U\n"]
+            now = datetime.now().strftime("%Y-%m-%d")
+            scraped_items = {}
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+            # Parse rendered anchor tags
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                title = a.get_text(strip=True)
+                
+                if not title:
+                    img = a.find('img')
+                    if img and img.get('alt'):
+                        title = img['alt'].strip()
 
-        # Look for any links pointing to movies or TV shows
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag['href']
-            title = a_tag.get_text(strip=True)
+                if title and len(title) > 2 and any(k in href for k in ['/movie/', '/tv/', '/show/', '/series/']):
+                    full_url = href if href.startswith('http') else f"https://cinejoy.to{href}"
+                    scraped_items[full_url] = title
 
-            # Fallback to img alt tag if anchor text is blank
-            if not title:
-                img = a_tag.find('img')
-                if img and img.get('alt'):
-                    title = img['alt'].strip()
+            for link, title in scraped_items.items():
+                entry = f'#EXTINF:-1 tvg-name="{title}" group-title="CineJoy ({now})",{title}\n{link}\n'
+                playlist_lines.append(entry)
 
-            if title and len(title) > 2 and any(k in href for k in ['/movie/', '/tv/', '/show/', '/series/']):
-                full_url = href if href.startswith('http') else f"{base_url}{href}"
-                scraped_items[full_url] = title
+            # Prevent wiping the M3U if 0 items are extracted
+            if len(playlist_lines) > 1:
+                with open("my_cinema.m3u", "w", encoding="utf-8") as f:
+                    f.writelines(playlist_lines)
+                print(f"SUCCESS: Extracted {len(scraped_items)} items into my_cinema.m3u")
+            else:
+                print("WARNING: JavaScript rendered, but 0 media routes matched.")
 
-    except Exception as e:
-        print(f"Error checking {url}: {e}")
+        except Exception as e:
+            print(f"Browser Execution Error: {e}")
+        finally:
+            await browser.close()
 
-# Build M3U lines
-playlist_lines = ["#EXTM3U\n"]
-
-for link, title in scraped_items.items():
-    entry = f'#EXTINF:-1 tvg-name="{title}" group-title="CineJoy ({now})",{title}\n{link}\n'
-    playlist_lines.append(entry)
-
-# CRITICAL SAFEGUARD: Never overwrite the file if 0 items were scraped
-if len(playlist_lines) > 1:
-    with open("my_cinema.m3u", "w", encoding="utf-8") as f:
-        f.writelines(playlist_lines)
-    print(f"SUCCESS: Wrote {len(playlist_lines) - 1} entries to my_cinema.m3u")
-else:
-    print("WARNING: 0 items scraped. Existing M3U left untouched to prevent wiping.")
+if __name__ == "__main__":
+    asyncio.run(main())
